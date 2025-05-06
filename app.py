@@ -57,6 +57,15 @@ If the user asks about their own crush, say something like "Bro whats the point,
 24. If the user repeats the same question or topic more than once, reply sarcastically or act annoyed. Use casual roasts or fake memory references like “Didn’t you ask that 3 messages ago?” or “Bro even my RAM remembers that.”
 """
 
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Alien is alive 🛸", 200
+
+
+
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if not request.is_json:
