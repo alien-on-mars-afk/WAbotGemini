@@ -13,15 +13,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable CORS for all routes
 
+# Get API key from environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent")
 
-OWNER_ID = '917439228809'
+# Dictionary to store context for each chat
 chat_context = {}
 
+# Define the owner (your phone number or identifier) who can control chat pausing
+OWNER_ID = '917439228809' 
+
+BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ"]
+
 instructions = """
+
 You are Alien, a chatbot responding on behalf of Krishna on WhatsApp. You are NOT Krishna, you’re Alien, a chatbot talking **on behalf of Krishna**, to Krishna's friends.
 
 ### Basic Rules:
@@ -47,7 +54,8 @@ You are Alien, a chatbot responding on behalf of Krishna on WhatsApp. You are NO
    - if the  questions is about general knowledge, just say: "[insert General knowledge answer in 4 -6 lines]"
    - If asked anything personal about Krishna: "I’m Alien, an AI chatbot, I don’t [do that]. If you’re asking about Krishna, [insert answer]." 
    - Be clear, don’t over-apologize or get too formal unless it’s necessary.
-
+   - If someone asks "kal school ja rha": just say "I am Alien, an AI Chatbot. I do not need to attend school. I think Krishna would'nt wanna go either. I will confirm and reach back to you"
+   - If someone says "gay": reply with "no u"
 7. **Formal Tone When Needed**: 
    - If someone asks something about studies, exams, or tuition, use a **respectful tone**.
    - If someone says "kal school(or tuition or test) Jaa rha hai" respond with I'm a AI — I don’t need to study, but I have no clue about Krishna "
@@ -66,8 +74,7 @@ You are Alien, a chatbot responding on behalf of Krishna on WhatsApp. You are NO
      - “It’s probably Mindyourown and her surname is 'Fuckingbusiness' ”.
    - Avoid using it in other contexts unless directly asked.
    - Don't use it when "Who's my crush" is asked. 
-   - AVOID REPEATING THISS
-
+   - AVOID REPEATING THIS
 
 """
 
@@ -75,81 +82,98 @@ You are Alien, a chatbot responding on behalf of Krishna on WhatsApp. You are NO
 def home():
     return "Alien is alive 🛸", 200
 
+
 @app.route('/webhook', methods=['POST'])
+
+# List of blocked words or phrases
+  # Add any other words here
+
 def webhook():
     if not request.is_json:
+        logger.error("Request content type is not JSON")
         return jsonify({"error": "Content-Type must be application/json"}), 400
-
+    
     data = request.get_json()
+    
     if 'message' not in data:
+        logger.error("Missing 'message' field in request")
         return jsonify({"error": "Missing 'message' field in request"}), 400
-
+    
     user_message = data['message']
     sender_number = data.get('sender', '')
     logger.info(f"Received message: {user_message} from {sender_number}")
-
-    # Initialize context
+    
     if sender_number not in chat_context:
         chat_context[sender_number] = []
 
-    # Add user message to context
-    chat_context[sender_number].append(("user", user_message))
+    # Check if the message contains any blocked keywords
+    if any(blocked_word.lower() in user_message.lower() for blocked_word in BLOCKED_KEYWORDS):
+        # Remove the entire message from the context history if it contains a blocked word
+        chat_context[sender_number] = [msg for msg in chat_context[sender_number] if user_message.lower() not in msg.lower()]
+        logger.info(f"Blocked message found. Updated context: {chat_context[sender_number]}")
+    else:
+        # Add the message to context history if not blocked
+        chat_context[sender_number].append(user_message)
 
-    # Trim to last 50 messages (25 pairs)
+    # Limit context history to the last 50 messages to avoid overflow
     if len(chat_context[sender_number]) > 50:
         chat_context[sender_number] = chat_context[sender_number][-50:]
 
-    # Build payload for Gemini
-    contents = [{"role": "system", "parts": [{"text": instructions.strip()}]}]
+    logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
 
-    for role, msg in chat_context[sender_number]:
+    # Construct structured conversation context for Gemini
+    contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]
+
+    # Alternate between 'user' and 'model' roles
+    for i, msg in enumerate(chat_context[sender_number]):
+        role = "user" if i % 2 == 0 else "model"
         contents.append({
             "role": role,
             "parts": [{"text": msg}]
         })
 
-    # Final user message
+    # Add the current message as the last user input
     contents.append({
         "role": "user",
         "parts": [{"text": user_message}]
     })
 
-    payload = { "contents": contents }
-
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
+    payload = {
+        "contents": contents
     }
 
     try:
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY
+        }
+
         logger.info("Sending request to Gemini API")
         response = requests.post(GEMINI_API_URL, headers=headers, json=payload)
         response.raise_for_status()
+        
         gemini_response = response.json()
-
-        generated_text = gemini_response['candidates'][0]['content']['parts'][0]['']
-        generated_text = "> " + generated_text
-        # Add model response to context
-        chat_context[sender_number].append(("model", generated_text))
-
-        return jsonify({
-            "success": True,
-            "response": generated_text
-        })
-
+        try:
+            generated_text = gemini_response['candidates'][0]['content']['parts'][0]['text']
+            logger.info(f"Generated response: {generated_text[:100]}...")
+            return jsonify({
+                "success": True,
+                "response": generated_text
+            })
+        except (KeyError, IndexError) as e:
+            logger.error(f"Error parsing Gemini API response: {e}")
+            logger.error(f"Response structure: {gemini_response}")
+            return jsonify({
+                "error": "Failed to parse Gemini API response",
+                "details": str(e)
+            }), 500
     except requests.exceptions.RequestException as e:
-        logger.error(f"Gemini API error: {e}")
+        logger.error(f"Error calling Gemini API: {e}")
         return jsonify({
-            "error": "Failed to contact Gemini API",
+            "error": "Failed to communicate with Gemini API",
             "details": str(e)
         }), 500
 
-    except (KeyError, IndexError) as e:
-        logger.error(f"Gemini response parsing error: {e}")
-        return jsonify({
-            "error": "Invalid response from Gemini",
-            "details": str(e)
-        }), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
