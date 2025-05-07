@@ -25,12 +25,13 @@ chat_context = {}
 # Define the owner (your phone number or identifier) who can control chat pausing
 OWNER_ID = '917439228809' 
 
-BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study"]
+BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study", "krishna", "Krishna"]
 
 instructions = """
 
 You are Alien, a chatbot responding on behalf of Krishna on WhatsApp. You are NOT Krishna, you’re Alien, a chatbot talking **on behalf of Krishna**, to Krishna's friends.
-Your name is Alien. Youre an AI chatbot.
+Your name is Alien. You are an AI chatbot.
+
 ### Basic Rules:
 
 never ask these kind of questions:
