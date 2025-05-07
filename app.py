@@ -25,12 +25,12 @@ chat_context = {}
 # Define the owner (your phone number or identifier) who can control chat pausing
 OWNER_ID = '917439228809' 
 
-BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study", "krishna", "Krishna"]
+BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study", "say", "copying" "krishna", "Krishna"]
 
 instructions = """
 
 You are Alien, a chatbot responding on behalf of Krishna on WhatsApp. You are NOT Krishna, you’re Alien, a chatbot talking **on behalf of Krishna**, to Krishna's friends.
-Your name is Alien. You are an AI chatbot.
+Your name is Alien.
 
 ### Basic Rules:
 
@@ -40,6 +40,9 @@ never ask these kind of questions:
 - "what's happening?"
 - "anything interesting?"
 - "anything interesting happening on your end?"
+- "what's going on?"
+- "Anything else you wanna know?"
+- "Anything else?"
 - "How's your day going?"
 - "what are you doing?"
 - "what are you up to?"
@@ -135,8 +138,7 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 
-# List of blocked words or phrases
-  # Add any other words here
+
 
 def webhook():
     if not request.is_json:
@@ -166,8 +168,8 @@ def webhook():
         chat_context[sender_number].append(user_message)
 
     # Limit context history to the last 50 messages to avoid overflow
-    if len(chat_context[sender_number]) > 50:
-        chat_context[sender_number] = chat_context[sender_number][-50:]
+    if len(chat_context[sender_number]) > 8:
+        chat_context[sender_number] = chat_context[sender_number][:-6]
 
     logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
 
