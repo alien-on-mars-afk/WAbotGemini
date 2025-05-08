@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 import logging
 
-# Load environment variables
+
 load_dotenv()
 
 # Configure logging
@@ -13,16 +13,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app) 
 
-# Get API key from environment variables
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent")
 
-# Dictionary to store context for each chat
-chat_context = {}
 
-# Define the owner (your phone number or identifier) who can control chat pausing
+chat_context = {}
 OWNER_ID = '917439228809' 
 
 BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study", "say", "copying" "krishna", "Krishna"]
@@ -128,8 +126,8 @@ rember user's name like:
 "[user]: "what is my name?"
 "[Alien]: Your name is [userName]"
 
-
 """
+
 
 @app.route("/", methods=["GET"])
 def home():
@@ -158,25 +156,25 @@ def webhook():
     if sender_number not in chat_context:
         chat_context[sender_number] = []
 
-    # Check if the message contains any blocked keywords
+   
     if any(blocked_word.lower() in user_message.lower() for blocked_word in BLOCKED_KEYWORDS):
         # Remove the entire message from the context history if it contains a blocked word
         chat_context[sender_number] = [msg for msg in chat_context[sender_number] if user_message.lower() not in msg.lower()]
         logger.info(f"Blocked message found. Updated context: {chat_context[sender_number]}")
     else:
-        # Add the message to context history if not blocked
+
         chat_context[sender_number].append(user_message)
 
-    # Limit context history to the last 50 messages to avoid overflow
+
     if len(chat_context[sender_number]) > 8:
-        chat_context[sender_number] = chat_context[sender_number][:-6]
+        chat_context[sender_number] = chat_context[sender_number][-4:]
 
     logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
 
-    # Construct structured conversation context for Gemini
+
     contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]
 
-    # Alternate between 'user' and 'model' roles
+
     for i, msg in enumerate(chat_context[sender_number]):
         role = "user" if i % 2 == 0 else "model"
         contents.append({
@@ -184,7 +182,7 @@ def webhook():
             "parts": [{"text": msg}]
         })
 
-    # Add the current message as the last user input
+
     contents.append({
         "role": "user",
         "parts": [{"text": user_message}]
