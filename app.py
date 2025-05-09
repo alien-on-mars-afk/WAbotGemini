@@ -174,6 +174,7 @@ def webhook():
     sender_number = data.get('sender', '')
     logger.info(f"Received message: {user_message} from {sender_number}")
     
+    # Initialize context for sender if not already present
     if sender_number not in chat_context:
         chat_context[sender_number] = []
 
@@ -183,18 +184,18 @@ def webhook():
         chat_context[sender_number] = [msg for msg in chat_context[sender_number] if user_message.lower() not in msg.lower()]
         logger.info(f"Blocked message found. Updated context: {chat_context[sender_number]}")
     else:
-        chat_context[sender_number].append(user_message)
+        # Append user message to context
+        chat_context[sender_number].append({"role": "user", "message": user_message})
 
-    # Limit context to last 7 messages to avoid overflow
-    if len(chat_context[sender_number]) > 14:
-        chat_context[sender_number] = chat_context[sender_number][-7:]
+    # Limit context to the last 7 exchanges (user and model messages) to avoid overflow
+    if len(chat_context[sender_number]) > 15:
+        chat_context[sender_number] = chat_context[sender_number][-8:]
 
     logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
 
-    # Start building the payload
-    contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]
+    # Start building the payload with structured context
+    contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]  # Including instructions.strip() here
 
-    # Add both user and model messages to the context
     for i, msg in enumerate(chat_context[sender_number]):
         role = "user" if i % 2 == 0 else "model"
         contents.append({
@@ -202,9 +203,10 @@ def webhook():
             "parts": [{"text": msg}]
         })
 
+    # Add the last user message
     contents.append({
         "role": "user",
-        "parts": [{"text": user_message}]  # Last user message for context
+        "parts": [{"text": user_message}]
     })
 
     payload = {
@@ -230,7 +232,7 @@ def webhook():
             logger.info(f"Generated response: {generated_text[:100]}...")
 
             # Add the model's response to the chat context
-            chat_context[sender_number].append(generated_text)
+            chat_context[sender_number].append({"role": "model", "message": generated_text})
 
             return jsonify({
                 "success": True,
@@ -249,7 +251,6 @@ def webhook():
             "error": "Failed to communicate with Gemini API",
             "details": str(e)
         }), 500
-
 
 
 @app.route('/health', methods=['GET'])
