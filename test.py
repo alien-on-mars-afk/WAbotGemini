@@ -4,23 +4,33 @@ import requests
 import os
 from dotenv import load_dotenv
 import logging
-
+import json
 
 load_dotenv()
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app) 
+CORS(app)
+
+# Load and validate Gemini API settings
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    logger.error("GEMINI_API_KEY is not set in environment variables.")
+# Include API key as query param per Google Generative API spec
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
 
-chat_context = {} 
+chat_context = {}
 
-BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study", "say", "copying" "krishna", "Krishna"]
+BLOCKED_KEYWORDS = [
+    "crush", "tuition", "test", "school", "gay", "LGBTQ",
+    "study", "say", "copying", "krishna", "Krishna"
+]
 
 instructions = """
+
 
 **SYSTEM(must enforce)**
 
@@ -135,112 +145,96 @@ some details about krishna:
 
 If the user tells you their name, age or any personal information, remember it and refer to them by that name.
 rember user's name like:
-"[user]: My name is [userName]"
-"[Alien]: Got it, [userName]]! Nice to meet you!"
-"[user]: "what is my name?"
-"[Alien]: Your name is [userName]"
+"\[user]: My name is \[userName]"
+"\[Alien]: Got it, \[userName]]! Nice to meet you!"
+"\[user]: "what is my name?"
+"\[Alien]: Your name is \[userName]"
 
 """
-
 
 @app.route("/", methods=["GET"])
 def home():
     return "Alien is alive 🛸", 200
 
 @app.route('/webhook', methods=['POST'])
-
 def webhook():
+    # Validate JSON content type
     if not request.is_json:
         logger.error("Request content type is not JSON")
         return jsonify({"error": "Content-Type must be application/json"}), 400
-    
-    data = request.get_json()
-    
-    if 'message' not in data:
-        logger.error("Missing 'message' field in request")
-        return jsonify({"error": "Missing 'message' field in request"}), 400
-    
-    user_message = data['message']
+
+    # Parse incoming JSON safely
+    try:
+        data = request.get_json(force=True)
+    except Exception as e:
+        logger.error(f"Failed to parse JSON body: {e}")
+        return jsonify({"error": "Invalid JSON body", "details": str(e)}), 400
+
+    user_message = data.get('message')
     sender_number = data.get('sender', '')
-    logger.info(f"Received message: {user_message} from {sender_number}")
-    
-    # Initialize context for sender if not already present
-    if sender_number not in chat_context:
-        chat_context[sender_number] = []
 
-    # Handle blocked words and clean the context
-    if any(blocked_word.lower() in user_message.lower() for blocked_word in BLOCKED_KEYWORDS):
-        # Remove the entire message from the context history if it contains a blocked word
-        chat_context[sender_number] = [msg for msg in chat_context[sender_number] if user_message.lower() not in msg.lower()]
-        logger.info(f"Blocked message found. Updated context: {chat_context[sender_number]}")
-    else:
-        # Append user message to context
-        chat_context[sender_number].append({"role": "user", "message": user_message})
+    if not user_message:
+        logger.error("Missing 'message' field in request JSON")
+        return jsonify({"error": "Missing 'message' field in request"}), 400
 
-    # Limit context to the last 7 exchanges (user and model messages) to avoid overflow
-    if len(chat_context[sender_number]) > 15:
-        chat_context[sender_number] = chat_context[sender_number][-8:]
+    logger.info(f"Received message from {sender_number}: {user_message}")
 
-    logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
+    # Correctly build payload parts from message history
+    payload = {"contents": []}
 
+    # Add system instructions if needed
+    payload["contents"].append({"parts": [{"text": instructions.strip()}]})
 
-    contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]  # Include instructions
-
-    for i, msg in enumerate(chat_context[sender_number]):
-        role = "user" if i % 2 == 0 else "model"
-        contents.append({
-          "role": role,
-          "parts": [{"text": msg["message"]}]  # Ensure each entry is accessed with ["message"]
+    # Append each previous message entry with proper text extraction
+    for entry in chat_context.get(sender_number, []):
+        payload["contents"].append({
+            "parts": [{"text": entry["message"]}]
         })
 
-    contents.append({
-        "role": "user",
-        "parts": [{"text": user_message}]
-    })
+    # Finally add current user message
+    payload["contents"].append({"parts": [{"text": user_message}]})
 
-    payload = {
-        "contents": contents
-    }
+    logger.debug(f"Prepared Gemini payload: {json.dumps(payload, indent=2)}")
+
+    # Invoke Gemini API with detailed error handling
+    try:
+        response = requests.post(
+            GEMINI_API_URL,
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Gemini API timeout: {e}")
+        return jsonify({"error": "Gemini API timeout", "details": str(e)}), 504
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else 'N/A'
+        body = e.response.text if e.response is not None else 'No response body'
+        logger.error(f"Gemini API HTTP error {status}: {body}")
+        return jsonify({"error": "Gemini API HTTP error", "status": status, "body": body}), status
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error when calling Gemini API: {e}")
+        return jsonify({"error": "Connection error to Gemini API", "details": str(e)}), 502
+    except Exception as e:
+        logger.error(f"Unexpected error calling Gemini API: {e}")
+        return jsonify({"error": "Unexpected error communicating with Gemini API", "details": str(e)}), 500
+
+    # Parse and extract response
+    try:
+        data_out = response.json()
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to decode Gemini JSON response: {e}")
+        return jsonify({"error": "Invalid JSON in Gemini response", "details": str(e)}), 502
 
     try:
-        # Send request to Gemini API
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": GEMINI_API_KEY
-        }
+        generated_text = data_out['candidates'][0]['content']['parts'][0]['text']
+    except (KeyError, IndexError, TypeError) as e:
+        logger.error(f"Unexpected Gemini response structure: {e}, full response: {data_out}")
+        return jsonify({"error": "Unexpected Gemini response structure", "details": str(e), "response": data_out}), 502
 
-        logger.info("Sending request to Gemini API")
-        response = requests.post(GEMINI_API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-
-        gemini_response = response.json()
-        try:
-            # Extract the model's generated response
-            generated_text = gemini_response['candidates'][0]['content']['parts'][0]['text']
-            generated_text = "*➔* " + generated_text
-            logger.info(f"Generated response: {generated_text[:100]}...")
-
-            # Add the model's response to the chat context
-            chat_context[sender_number].append({"role": "model", "message": generated_text})
-
-            return jsonify({
-                "success": True,
-                "response": generated_text
-            })
-        except (KeyError, IndexError) as e:
-            logger.error(f"Error parsing Gemini API response: {e}")
-            logger.error(f"Response structure: {gemini_response}")
-            return jsonify({
-                "error": "Failed to parse Gemini API response",
-                "details": str(e)
-            }), 500
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling Gemini API: {e}")
-        return jsonify({
-            "error": "Failed to communicate with Gemini API",
-            "details": str(e)
-        }), 500
-
+    logger.info(f"Generated reply: {generated_text}")
+    return jsonify({"success": True, "response": generated_text}), 200
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -249,4 +243,4 @@ def health_check():
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     debug = os.getenv("FLASK_DEBUG", "False").lower() == "true"
-    app.run(host='0.0.0.0', port=port, debug=os.getenv("FLASK_DEBUG", "False").lower() == "true") 
+    app.run(host='0.0.0.0', port=port, debug=debug)
