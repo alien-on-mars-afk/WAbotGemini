@@ -18,7 +18,7 @@ GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemin
 
 chat_context = {} 
 
-BLOCKED_KEYWORDS = ["crush", "tuition", "test", "school", "gay", "LGBTQ", "study", "say", "copying" "krishna", "Krishna"]
+BLOCKED_KEYWORDS = []
 
 instructions = """
 
@@ -183,8 +183,19 @@ def webhook():
 
     logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
 
+# Only inject instructions when the history is short (new/trimmed)
+# or when the instructions text isn’t already in the context
+    if (
+        len(chat_context[sender_number]) <= 7
+        or not any(
+            entry["message"] == instructions.strip()
+            for entry in chat_context[sender_number]
+        )
+    ):
+        contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]
+    else:
+        contents = []
 
-    contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]  # Include instructions
 
     for i, msg in enumerate(chat_context[sender_number]):
         role = "user" if i % 2 == 0 else "model"
