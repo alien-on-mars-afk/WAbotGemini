@@ -157,6 +157,8 @@ def home():
 
 
 
+@app.route('/webhook', methods=['POST'])
+
 def webhook():
     if not request.is_json:
         logger.error("Request content type is not JSON")
@@ -175,25 +177,24 @@ def webhook():
     if sender_number not in chat_context:
         chat_context[sender_number] = []
 
-   
+    # Handle blocked words and clean the context
     if any(blocked_word.lower() in user_message.lower() for blocked_word in BLOCKED_KEYWORDS):
         # Remove the entire message from the context history if it contains a blocked word
         chat_context[sender_number] = [msg for msg in chat_context[sender_number] if user_message.lower() not in msg.lower()]
         logger.info(f"Blocked message found. Updated context: {chat_context[sender_number]}")
     else:
-
         chat_context[sender_number].append(user_message)
 
-
+    # Limit context to last 7 messages to avoid overflow
     if len(chat_context[sender_number]) > 14:
         chat_context[sender_number] = chat_context[sender_number][-7:]
 
     logger.info(f"Current context for {sender_number}: {chat_context[sender_number]}")
 
-
+    # Start building the payload
     contents = [{"role": "user", "parts": [{"text": instructions.strip()}]}]
 
-
+    # Add both user and model messages to the context
     for i, msg in enumerate(chat_context[sender_number]):
         role = "user" if i % 2 == 0 else "model"
         contents.append({
@@ -201,10 +202,9 @@ def webhook():
             "parts": [{"text": msg}]
         })
 
-
     contents.append({
         "role": "user",
-        "parts": [{"text": user_message}]
+        "parts": [{"text": user_message}]  # Last user message for context
     })
 
     payload = {
@@ -212,6 +212,7 @@ def webhook():
     }
 
     try:
+        # Send request to Gemini API
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": GEMINI_API_KEY
@@ -220,12 +221,17 @@ def webhook():
         logger.info("Sending request to Gemini API")
         response = requests.post(GEMINI_API_URL, headers=headers, json=payload)
         response.raise_for_status()
-        
+
         gemini_response = response.json()
         try:
+            # Extract the model's generated response
             generated_text = gemini_response['candidates'][0]['content']['parts'][0]['text']
             generated_text = "*➔* " + generated_text
             logger.info(f"Generated response: {generated_text[:100]}...")
+
+            # Add the model's response to the chat context
+            chat_context[sender_number].append(generated_text)
+
             return jsonify({
                 "success": True,
                 "response": generated_text
@@ -243,6 +249,7 @@ def webhook():
             "error": "Failed to communicate with Gemini API",
             "details": str(e)
         }), 500
+
 
 
 @app.route('/health', methods=['GET'])
