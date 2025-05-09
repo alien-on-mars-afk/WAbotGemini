@@ -217,11 +217,13 @@ def webhook():
         try:
             # Extract the model's generated response
             generated_text = gemini_response['candidates'][0]['content']['parts'][0]['text']
-            generated_text = "*➔* " + generated_text
+           
             logger.info(f"Generated response: {generated_text[:100]}...")
 
             # Add the model's response to the chat context
             chat_context[sender_number].append({"role": "model", "message": generated_text})
+
+            generated_text = "*➔* " + generated_text
 
             return jsonify({
                 "success": True,
