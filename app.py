@@ -224,7 +224,7 @@ def webhook():
         gemini_response = response.json()
         try:
             generated_text = gemini_response['candidates'][0]['content']['parts'][0]['text']
-            generated_text = "*➔*" + generated_text
+            generated_text = "*➔* " + generated_text
             logger.info(f"Generated response: {generated_text[:100]}...")
             return jsonify({
                 "success": True,
